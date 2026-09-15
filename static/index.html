@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>国内实习雷达</title><link rel="stylesheet" href="/static/style.css"></head><body>
+<header><div><p class="eyebrow">PERSONAL JOB INTELLIGENCE</p><h1>国内实习雷达</h1></div><a class="export" href="/api/jobs/export">导出 CSV</a></header>
+<main>
+<section class="profile" id="profile"><div><span>身份</span><strong>正在加载个人配置…</strong></div></section>
+<section class="stats" id="stats"></section>
+<section class="toolbar"><input id="search" placeholder="搜索公司、职位、技能"><select id="city"><option value="">全部城市</option><option value="yangtze">长三角优先</option><option value="pearl">珠三角其次</option></select><select id="status"><option value="">全部状态</option><option>待浏览</option><option>已收藏</option><option>已投递</option><option>面试中</option></select><button id="add">+ 手工录入岗位</button></section>
+<section id="empty" class="empty"><h2>职位库还没有岗位</h2><p>先从目标公司官网复制一个职位链接，再手工录入；也可以通过 API 批量导入 JSON。每条职位都会按你的可到岗时间、城市、岗位方向和技能自动评分。</p></section><section id="jobs" class="jobs"></section>
+<section class="sources"><div><p class="eyebrow">OFFICIAL SOURCES</p><h2>首批官网来源</h2><p>全部为官网入口。当前均等待单独验证公开接口后再启用采集器。</p></div><div id="companies" class="company-list"></div></section>
+</main>
+<dialog id="modal"><form method="dialog" id="jobForm"><div class="modal-head"><h2>录入职位</h2><button class="close">×</button></div><label>职位名称<input name="title" required placeholder="后端开发实习生"></label><label>公司<input name="company" required></label><label>城市<input name="city" placeholder="上海"></label><label>职位链接<input name="url" type="url" required></label><div class="split"><label>实习周数<input name="duration_weeks" type="number" min="1" placeholder="10"></label><label>每周天数<input name="work_days" type="number" min="1" max="7" placeholder="5"></label></div><label>来源<input name="source" value="官网"></label><label>职位描述<textarea name="description" placeholder="粘贴任职要求、技术栈和时间要求"></textarea></label><button class="primary" type="submit">保存并评分</button></form></dialog>
+<script src="/static/app.js"></script></body></html>

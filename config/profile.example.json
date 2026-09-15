@@ -1,0 +1,11 @@
+{
+  "school": "The University of Queensland",
+  "graduation": "2027-11",
+  "availability_start": "2026-12-01",
+  "availability_end": "2027-02-17",
+  "days_per_week": 5,
+  "priority_cities": ["上海", "杭州", "苏州", "南京", "宁波"],
+  "secondary_cities": ["深圳", "广州", "珠海", "厦门"],
+  "role_priority": ["后端开发", "AI应用", "平台研发", "云原生", "数据工程", "全栈开发", "测试开发"],
+  "skills": ["Java", "Spring Boot", "Python", "SQL", "Redis", "Linux", "Docker", "Git"]
+}
