@@ -346,6 +346,109 @@ def netease_internships() -> SyncResult:
     return SyncResult("网易", jobs, f"已读取 {len(jobs)} 条公开校园/实习职位（单次上限 100）")
 
 
+def feishu_internships(company: str, host: str, channel: str) -> SyncResult:
+    """Shared client for official Feishu Hire campus portals."""
+    data = request_json(
+        f"https://{host}/api/v1/search/job/posts",
+        body={"keyword": "", "limit": 100, "offset": 0, "portal_type": 3, "portal_entrance": 1, "language": "zh", "recruitment_id_list": ["202"]},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Origin": f"https://{host}", "Referer": f"https://{host}/{channel}",
+            "portal-channel": channel, "portal-platform": "pc", "website-path": channel,
+        },
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(data.get("message") or f"{company} API returned an error")
+    posts = data.get("data", {}).get("job_post_list", [])
+    jobs = []
+    for post in posts:
+        post_id = str(post.get("id") or "")
+        city = " / ".join(item.get("name", "") for item in (post.get("city_list") or []) if item.get("name"))
+        jobs.append({
+            "title": post.get("title") or "未命名职位", "company": company, "city": city,
+            "description": text((post.get("job_category") or {}).get("name"), (post.get("job_function") or {}).get("name"), post.get("description"), post.get("requirement")),
+            "url": f"https://{host}/{channel}/position/{post_id}/detail" if post_id else f"https://{host}/{channel}",
+            "source": f"{company}官网 API",
+        })
+    return SyncResult(company, jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 100）")
+
+
+def xpeng_internships() -> SyncResult:
+    return feishu_internships("小鹏汽车", "xiaopeng.jobs.feishu.cn", "campus")
+
+
+def nio_internships() -> SyncResult:
+    return feishu_internships("蔚来", "nio.jobs.feishu.cn", "campus")
+
+
+def trip_internships() -> SyncResult:
+    """Ctrip's public feed is complete in one response; filter internships locally."""
+    data = request_json(
+        "https://careers.ctrip.com/api/hrrecruit/getJobAd",
+        body={"condition": {"pageIndex": 1, "pageSize": 100}},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Origin": "https://careers.ctrip.com", "Referer": "https://careers.ctrip.com/campus",
+        },
+    )
+    if data.get("retCode") != "201":
+        raise RuntimeError(data.get("retMessage") or "Trip API returned an error")
+    posts = [item for item in (data.get("retValue", {}).get("recruitJobAdList", []) or []) if item.get("kind") == "3" or "实习" in (item.get("jobTitle") or "")]
+    jobs = [{
+        "title": post.get("jobTitle") or "未命名职位", "company": "携程", "city": post.get("cityName") or "",
+        "description": text(post.get("jobFamilyGroupName"), post.get("buName"), post.get("duty"), post.get("requirements")),
+        "url": f"https://careers.ctrip.com/campus#/experienced/job-detail/{post['fromId']}" if post.get("fromId") else "https://careers.ctrip.com/campus",
+        "source": "携程官网 API",
+    } for post in posts]
+    return SyncResult("携程", jobs, f"已读取 {len(jobs)} 条公开实习职位")
+
+
+def iflytek_internships() -> SyncResult:
+    """Fetch the iFlytek Beisen portal's dedicated intern category."""
+    data = request_json(
+        "https://iflytek.zhiye.com/api/Jobad/GetJobAdPageList",
+        body={"PageIndex": 0, "PageSize": 50, "KeyWords": "", "SpecialType": 0, "PortalId": "", "Category": ["3"], "DisplayFields": ["Category", "Kind", "LocId", "Org", "PostDate"]},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "Origin": "https://iflytek.zhiye.com", "Referer": "https://iflytek.zhiye.com/jobs",
+            "x-requested-with": "xmlhttprequest", "langtype": "zh_CN",
+        },
+    )
+    if data.get("Code") != 200:
+        raise RuntimeError(data.get("Message") or "iFlytek API returned an error")
+    posts = data.get("Data") or []
+    jobs = [{
+        "title": post.get("JobAdName") or "未命名职位", "company": "科大讯飞", "city": " / ".join(post.get("LocNames") or []),
+        "description": text(post.get("Category"), post.get("Org"), post.get("Duty"), post.get("Require")),
+        "url": f"https://iflytek.zhiye.com/intern/detail?jobAdId={post.get('JobAdId') or post.get('Id')}" if (post.get("JobAdId") or post.get("Id")) else "https://iflytek.zhiye.com/jobs",
+        "source": "科大讯飞官网 API",
+    } for post in posts]
+    return SyncResult("科大讯飞", jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 50）")
+
+
+def horizon_internships() -> SyncResult:
+    """Fetch Horizon Robotics' public Wecruit campus channel."""
+    channel = "SU6409ef49bef57c635fd390a6"
+    data = request_form(
+        f"https://wecruit.hotjob.cn/wecruit/positionInfo/listPosition/{channel}?iSaJAx=isAjax&request_locale=zh_CN",
+        {"isFrompb": "true", "recruitType": "1", "pageSize": "100", "currentPage": "1"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "Origin": "https://wecruit.hotjob.cn", "Referer": f"https://wecruit.hotjob.cn/{channel}/pb/school.html", "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    if data.get("state") != "200":
+        raise RuntimeError(data.get("msg") or "Horizon API returned an error")
+    posts = (data.get("data") or {}).get("pageForm", {}).get("pageData", [])
+    jobs = [{
+        "title": post.get("postName") or "未命名职位", "company": "地平线", "city": post.get("workPlaceStr") or "",
+        "description": text(post.get("postTypeName"), post.get("department"), post.get("description"), post.get("requirement")),
+        "url": f"https://wecruit.hotjob.cn/{channel}/pb/school.html#/postDetail?postId={post['postId']}" if post.get("postId") else f"https://wecruit.hotjob.cn/{channel}/pb/school.html",
+        "source": "地平线官网 API",
+    } for post in posts]
+    return SyncResult("地平线", jobs, f"已读取 {len(jobs)} 条公开校园/实习职位（单次上限 100）")
+
+
 CONNECTORS = {
     "字节跳动": bytedance_internships,
     "腾讯": tencent_internships,
@@ -356,4 +459,9 @@ CONNECTORS = {
     "百度": baidu_internships,
     "哔哩哔哩": bilibili_internships,
     "网易": netease_internships,
+    "小鹏汽车": xpeng_internships,
+    "蔚来": nio_internships,
+    "携程": trip_internships,
+    "科大讯飞": iflytek_internships,
+    "地平线": horizon_internships,
 }

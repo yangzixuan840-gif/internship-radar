@@ -61,10 +61,18 @@ COMPANIES = [
     ("哔哩哔哩", "https://jobs.bilibili.com/", "active", "公开实习职位 API（匿名 CSRF 握手）"),
     ("米哈游", "https://jobs.mihoyo.com/", "planned", "官方职位接口"),
     ("大疆", "https://we.dji.com/zh-CN", "planned", "官网职位页"),
-    ("携程", "https://jobs.ctrip.com/", "planned", "官网职位页"),
-    ("科大讯飞", "https://hr.iflytek.com/", "planned", "官网职位页"),
-    ("商汤科技", "https://www.sensetime.com/cn/join-us", "planned", "官网职位页"),
+    ("携程", "https://careers.ctrip.com/campus", "active", "公开职位 API（实习岗位客户端过滤）"),
+    ("科大讯飞", "https://iflytek.zhiye.com/jobs", "active", "公开飞YOUNG实习生 API（当前可能无开放岗位）"),
+    ("商汤科技", "https://hr.sensetime.com/edu", "planned", "官网接口当前不稳定，等待重新验证"),
     ("金山办公", "https://talent.wps.cn/", "planned", "官网职位页"),
+    ("地平线", "https://wecruit.hotjob.cn/SU6409ef49bef57c635fd390a6/pb/school.html", "active", "公开校园/实习职位 API"),
+    ("小鹏汽车", "https://xiaopeng.jobs.feishu.cn/campus", "active", "公开校园实习 API"),
+    ("蔚来", "https://nio.jobs.feishu.cn/campus", "active", "公开校园实习 API"),
+    ("理想汽车", "https://www.lixiang.com/employ/campus.html", "planned", "官网职位页，待验证公开接口"),
+    ("极氪", "https://www.zeekrlife.com/career", "planned", "官网职位页，待验证公开接口"),
+    ("海康威视", "https://hr.hikvision.com/", "planned", "官网存在访问限制，待验证公开接口"),
+    ("微众银行", "https://www.webank.com/career/", "planned", "招聘主要通过公众号/小程序，暂无公开 API"),
+    ("平安科技", "https://campus.pingan.com/", "planned", "官网职位页，待验证公开接口"),
 ]
 
 app = FastAPI(title="国内实习雷达")
