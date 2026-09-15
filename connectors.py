@@ -41,6 +41,18 @@ def request_json(url: str, *, body: dict[str, Any] | None = None, headers: dict[
         raise RuntimeError(f"upstream unavailable: {error}") from error
 
 
+def request_form(url: str, fields: dict[str, str], *, headers: dict[str, str]) -> dict[str, Any]:
+    """POST a standard URL-encoded public search form."""
+    request_headers = {"Accept": "application/json, text/plain, */*", "User-Agent": USER_AGENT, "Content-Type": "application/x-www-form-urlencoded", **headers}
+    try:
+        with urlopen(Request(url, data=urlencode(fields).encode("utf-8"), headers=request_headers, method="POST"), timeout=15) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise RuntimeError(f"upstream HTTP {error.code}") from error
+    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"upstream unavailable: {error}") from error
+
+
 def text(*parts: Any) -> str:
     """Join meaningful non-empty fields without leaking Python representations."""
     return "\n".join(str(part).strip() for part in parts if part and str(part).strip())
@@ -255,6 +267,85 @@ def didi_internships() -> SyncResult:
     return SyncResult("滴滴", jobs, f"已读取 {len(jobs)} 条公开校园/实习职位（6 页上限）")
 
 
+def baidu_internships() -> SyncResult:
+    """Fetch a capped page of Baidu's daily-internship public board."""
+    data = request_form(
+        "https://talent.baidu.com/httservice/getPostListNew",
+        {"recruitType": "INTERN", "keyWord": "", "curPage": "1", "pageSize": "20", "projectType": "-1"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://talent.baidu.com/jobs/list?recruitType=INTERN",
+        },
+    )
+    if data.get("status") != "ok":
+        raise RuntimeError(data.get("message") or "Baidu API returned an error")
+    posts = data.get("data", {}).get("list", [])
+    jobs = [{
+        "title": post.get("name") or "未命名职位",
+        "company": "百度",
+        "city": post.get("workPlace") or "",
+        "description": text(post.get("postType"), post.get("projectType"), post.get("workContent"), post.get("serviceCondition")),
+        "url": f"https://talent.baidu.com/jobs/detail/INTERN/{post['postId']}" if post.get("postId") else "https://talent.baidu.com/jobs/list?recruitType=INTERN",
+        "source": "百度官网 API",
+    } for post in posts]
+    return SyncResult("百度", jobs, f"已读取 {len(jobs)} 条公开日常实习职位（单次上限 20）")
+
+
+def bilibili_internships() -> SyncResult:
+    """Use Bilibili's anonymous CSRF handshake, then request intern listings."""
+    base_headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "X-AppKey": "ops.ehr-api.auth",
+        "X-UserType": "2",
+        "Referer": "https://jobs.bilibili.com/",
+    }
+    csrf = request_json("https://jobs.bilibili.com/api/auth/v1/csrf/token", headers=base_headers)
+    token = csrf.get("data")
+    if csrf.get("code") != 0 or not token:
+        raise RuntimeError(csrf.get("message") or "Bilibili CSRF handshake failed")
+    data = request_json(
+        "https://jobs.bilibili.com/api/campus/position/positionList",
+        body={"pageNum": 1, "pageSize": 100, "positionName": "", "deptCodeList": [], "workTypeList": [0], "positionTypeList": [], "workLocationList": []},
+        headers={**base_headers, "X-CSRF": token, "Cookie": f"X-CSRF={token}"},
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(data.get("message") or "Bilibili API returned an error")
+    posts = data.get("data", {}).get("list", [])
+    jobs = [{
+        "title": post.get("positionName") or "未命名职位",
+        "company": "哔哩哔哩",
+        "city": post.get("workLocation") or "",
+        "description": text(post.get("postCodeName"), post.get("positionDescription")),
+        "url": f"https://jobs.bilibili.com/campus/positions/{post['id']}" if post.get("id") else "https://jobs.bilibili.com/campus/positions",
+        "source": "哔哩哔哩官网 API",
+    } for post in posts]
+    return SyncResult("哔哩哔哩", jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 100）")
+
+
+def netease_internships() -> SyncResult:
+    """Fetch one large page from NetEase's public campus/internship board."""
+    data = request_json(
+        "https://hr.163.com/api/hr163/position/queryPage",
+        body={"currentPage": 1, "pageSize": 100, "workType": "1", "keyword": ""},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://hr.163.com/job-list.html?workType=1",
+        },
+    )
+    if data.get("code") != 200:
+        raise RuntimeError(data.get("msg") or "NetEase API returned an error")
+    posts = data.get("data", {}).get("list", [])
+    jobs = [{
+        "title": post.get("name") or "未命名职位",
+        "company": "网易",
+        "city": " / ".join(post.get("workPlaceNameList") or []),
+        "description": text(post.get("firstPostTypeName"), post.get("firstDepName"), post.get("description"), post.get("requirement")),
+        "url": f"https://hr.163.com/job-detail.html?id={post['id']}" if post.get("id") else "https://hr.163.com/job-list.html?workType=1",
+        "source": "网易官网 API",
+    } for post in posts]
+    return SyncResult("网易", jobs, f"已读取 {len(jobs)} 条公开校园/实习职位（单次上限 100）")
+
+
 CONNECTORS = {
     "字节跳动": bytedance_internships,
     "腾讯": tencent_internships,
@@ -262,4 +353,7 @@ CONNECTORS = {
     "小红书": xiaohongshu_internships,
     "京东": jd_internships,
     "滴滴": didi_internships,
+    "百度": baidu_internships,
+    "哔哩哔哩": bilibili_internships,
+    "网易": netease_internships,
 }
