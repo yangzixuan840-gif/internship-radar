@@ -6,13 +6,15 @@ import json
 import re
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+from connectors import CONNECTORS
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "radar.db"
@@ -45,9 +47,9 @@ PROFILE = load_profile()
 # All links point to official career portals. "planned" means the connector is intentionally
 # not active until its public data contract has been validated and a low-frequency adapter exists.
 COMPANIES = [
-    ("字节跳动", "https://jobs.bytedance.com/campus/", "planned", "官方岗位 API / 浏览器响应监听"),
-    ("腾讯", "https://join.qq.com/", "planned", "官方职位接口"),
-    ("美团", "https://careers.meituan.com/", "planned", "官方职位接口"),
+    ("字节跳动", "https://jobs.bytedance.com/campus/", "active", "公开校园实习 API（单次最多 100 条）"),
+    ("腾讯", "https://join.qq.com/", "active", "公开校园实习 API（动态读取招聘项目）"),
+    ("美团", "https://zhaopin.meituan.com/web/campus", "active", "公开实习职位 API（单次最多 100 条）"),
     ("百度", "https://talent.baidu.com/jobs/", "planned", "官方职位接口"),
     ("阿里巴巴", "https://talent.alibaba.com/", "planned", "官网职位页"),
     ("蚂蚁集团", "https://talent.antgroup.com/", "planned", "官网职位页"),
@@ -93,7 +95,9 @@ def init_db() -> None:
         );
         """)
         conn.executemany(
-            "INSERT OR IGNORE INTO companies(name, careers_url, status, connector_note) VALUES (?, ?, ?, ?)",
+            """INSERT INTO companies(name, careers_url, status, connector_note) VALUES (?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET careers_url=excluded.careers_url,
+              status=excluded.status, connector_note=excluded.connector_note""",
             COMPANIES,
         )
         conn.commit()
@@ -164,6 +168,10 @@ class JobUpdate(BaseModel):
     favorite: bool | None = None
 
 
+class SyncRequest(BaseModel):
+    sources: list[str] | None = None
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -230,6 +238,38 @@ def import_jobs(jobs: list[JobInput]) -> dict[str, int]:
     for job in jobs:
         upsert_job(job)
     return {"imported": len(jobs)}
+
+
+@app.post("/api/sync")
+def sync_jobs(request: SyncRequest) -> dict[str, Any]:
+    """Sync public APIs with a per-company 20-minute safety window."""
+    selected = request.sources or list(CONNECTORS)
+    unknown = sorted(set(selected) - set(CONNECTORS))
+    if unknown:
+        raise HTTPException(400, f"暂不支持的数据源：{'、'.join(unknown)}")
+    now = datetime.now(timezone.utc)
+    results = []
+    for company in selected:
+        with closing(connection()) as conn:
+            row = conn.execute("SELECT last_checked_at FROM companies WHERE name = ?", (company,)).fetchone()
+        if row and row["last_checked_at"]:
+            previous = datetime.fromisoformat(row["last_checked_at"])
+            if now - previous < timedelta(minutes=20):
+                wait_seconds = int((timedelta(minutes=20) - (now - previous)).total_seconds())
+                results.append({"company": company, "status": "skipped", "message": f"低频保护：请在约 {max(1, wait_seconds // 60)} 分钟后再同步"})
+                continue
+        try:
+            fetched = CONNECTORS[company]()
+            for raw_job in fetched.jobs:
+                upsert_job(JobInput(**raw_job))
+            message, status = f"{fetched.message}；已写入/更新 {len(fetched.jobs)} 条", "ok"
+        except Exception as error:
+            message, status = f"同步失败：{error}", "error"
+        with closing(connection()) as conn:
+            conn.execute("UPDATE companies SET last_checked_at = ?, last_result = ? WHERE name = ?", (now.isoformat(), message, company))
+            conn.commit()
+        results.append({"company": company, "status": status, "message": message})
+    return {"results": results}
 
 
 @app.patch("/api/jobs/{job_id}")
