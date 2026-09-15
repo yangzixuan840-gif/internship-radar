@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -164,4 +165,101 @@ def meituan_internships() -> SyncResult:
     return SyncResult("美团", jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 100）")
 
 
-CONNECTORS = {"字节跳动": bytedance_internships, "腾讯": tencent_internships, "美团": meituan_internships}
+def xiaohongshu_internships() -> SyncResult:
+    """Fetch a capped campus page; Xiaohongshu includes intern tracks in it."""
+    data = request_json(
+        "https://job.xiaohongshu.com/websiterecruit/position/pageQueryPosition",
+        body={"recruitType": "campus", "pageNum": 1, "pageSize": 100},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Origin": "https://job.xiaohongshu.com",
+            "Referer": "https://job.xiaohongshu.com/campus/position",
+        },
+    )
+    if not (data.get("success") is True or data.get("statusCode") == 200):
+        raise RuntimeError(data.get("alertMsg") or data.get("errorMsg") or "Xiaohongshu API returned an error")
+    posts = data.get("data", {}).get("list", [])
+    jobs = [{
+        "title": post.get("positionName") or "未命名职位",
+        "company": "小红书",
+        "city": post.get("workplace") or "",
+        "description": text(post.get("jobType"), post.get("jobProjectName"), post.get("duty")),
+        "url": f"https://job.xiaohongshu.com/campus/position/{post['positionId']}" if post.get("positionId") else "https://job.xiaohongshu.com/campus/position",
+        "source": "小红书官网 API",
+    } for post in posts]
+    return SyncResult("小红书", jobs, f"已读取 {len(jobs)} 条校园招聘职位（含实习项目，单次上限 100）")
+
+
+def jd_internships() -> SyncResult:
+    """Fetch JD's public internship bucket only, capped to one page."""
+    data = request_json(
+        "https://campus.jd.com/api/wx/position/page?type=internship",
+        body={
+            "pageSize": 100,
+            "pageIndex": 0,
+            "parameter": {"positionName": "", "planIdList": [], "positionDeptList": [], "jobDirectionCodeList": [], "workCityCodeList": []},
+        },
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://campus.jd.com/",
+        },
+    )
+    if data.get("success") is not True:
+        raise RuntimeError(data.get("errorMessage") or "JD API returned an error")
+    posts = data.get("body", {}).get("items", [])
+    jobs = []
+    for post in posts:
+        requirement = post.get("requirementVoList") or []
+        cities = " / ".join(item.get("workCity", "") for item in requirement if item.get("workCity"))
+        jobs.append({
+            "title": post.get("positionName") or "未命名职位",
+            "company": "京东",
+            "city": cities,
+            "description": text(post.get("jobDirection"), post.get("workContent"), post.get("qualification")),
+            "url": f"https://campus.jd.com/#/newDetails?publishId={post['publishId']}" if post.get("publishId") else "https://campus.jd.com/",
+            "source": "京东官网 API",
+        })
+    return SyncResult("京东", jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 100）")
+
+
+def didi_internships() -> SyncResult:
+    """Read at most six public pages and keep the campus/intern JR entries."""
+    jobs, seen = [], set()
+    for page in range(1, 7):
+        query = urlencode({"page": page, "size": 16})
+        data = request_json(
+            f"https://talent.didiglobal.com/recruit-portal-service/api/job/front/list?{query}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer": "https://talent.didiglobal.com/",
+            },
+        )
+        if (data.get("meta") or {}).get("code") != 0:
+            raise RuntimeError((data.get("meta") or {}).get("message") or "Didi API returned an error")
+        for post in (data.get("data") or {}).get("items") or []:
+            jd_no = post.get("jdNo") or ""
+            if not jd_no.startswith("JR") or post.get("jdId") in seen:
+                continue
+            seen.add(post.get("jdId"))
+            title = post.get("jobName") or "未命名职位"
+            if title.endswith(f" ({jd_no})"):
+                title = title[: -len(jd_no) - 3]
+            jobs.append({
+                "title": title,
+                "company": "滴滴",
+                "city": post.get("workArea") or "",
+                "description": text(post.get("deptName"), post.get("jobType")),
+                "url": f"https://talent.didiglobal.com/campus#/position/{post['jdId']}/detail" if post.get("jdId") else "https://talent.didiglobal.com/",
+                "source": "滴滴官网 API",
+            })
+    return SyncResult("滴滴", jobs, f"已读取 {len(jobs)} 条公开校园/实习职位（6 页上限）")
+
+
+CONNECTORS = {
+    "字节跳动": bytedance_internships,
+    "腾讯": tencent_internships,
+    "美团": meituan_internships,
+    "小红书": xiaohongshu_internships,
+    "京东": jd_internships,
+    "滴滴": didi_internships,
+}
