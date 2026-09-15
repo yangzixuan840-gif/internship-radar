@@ -1,7 +1,76 @@
-const $=s=>document.querySelector(s), api=async(u,o)=>{const r=await fetch(u,o);if(!r.ok)throw Error(await r.text());return r.json()};
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-function renderProfile(profile){$('#profile').innerHTML=`<div><span>身份</span><strong>${esc(profile.school)} · ${esc(profile.graduation)} 毕业</strong></div><div><span>可到岗</span><strong>${esc(profile.availability_start)} — ${esc(profile.availability_end)} · ${esc(profile.days_per_week)} 天/周</strong></div><div><span>地点</span><strong>${profile.priority_cities.map(esc).join('、')} 优先</strong></div><div><span>方向</span><strong>${profile.role_priority.slice(0,3).map(esc).join(' → ')}</strong></div>`}
-async function load(){const [profile,dash,jobs,companies]=await Promise.all([api('/api/profile'),api('/api/dashboard'),api(`/api/jobs?q=${encodeURIComponent($('#search').value)}&status=${encodeURIComponent($('#status').value)}&city_group=${$('#city').value}`),api('/api/companies')]);renderProfile(profile);const metrics=[['已收录职位',dash.total],['高匹配 ≥75',dash.strong],['已投递',dash.applied],['面试中',dash.interviewing],['官网来源',dash.companies]];$('#stats').innerHTML=metrics.map(([l,n])=>`<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');$('#empty').hidden=jobs.length>0;$('#jobs').innerHTML=jobs.map(j=>`<article class="job"><div class="score">${j.score}</div><h3>${esc(j.title)}</h3><p class="meta">${esc(j.company)} · ${esc(j.city||'地点待确认')} · ${esc(j.source)}</p><p class="reason">${j.score_reasons.map(esc).join('<br>')}</p><div class="actions"><a href="${esc(j.url)}" target="_blank" rel="noopener">查看官网 ↗</a><button onclick="setJob(${j.id},'${j.favorite?'favorite':'status'}','${j.favorite?'false':'true'}')">${j.favorite?'取消收藏':'收藏'}</button><button onclick="setJob(${j.id},'status','已投递')">标记已投</button><button onclick="removeJob(${j.id})">删除</button></div></article>`).join('');$('#companies').innerHTML=companies.map(c=>`<div class="company"><a target="_blank" rel="noopener" href="${esc(c.careers_url)}">${esc(c.name)} ↗</a><small>待适配 · ${esc(c.connector_note)}</small></div>`).join('')}
-window.setJob=async(id,key,value)=>{await api('/api/jobs/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(key==='favorite'?{favorite:value==='true'}:{status:value})});load()};
-window.removeJob=async(id)=>{if(confirm('确认删除这条职位？')){await api('/api/jobs/'+id,{method:'DELETE'});load()}};
-$('#search').oninput=()=>load();$('#city').onchange=load;$('#status').onchange=load;$('#add').onclick=()=>$('#modal').showModal();$('#sync').onclick=async()=>{const button=$('#sync');button.disabled=true;button.textContent='正在同步…';try{const result=await api('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});alert(result.results.map(r=>`${r.company}：${r.message}`).join('\n'));await load()}catch(error){alert(`同步失败：${error.message}`)}finally{button.disabled=false;button.textContent='同步已接入官网'}};$('#jobForm').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));for(const k of ['duration_weeks','work_days'])data[k]=data[k]?Number(data[k]):null;await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});$('#modal').close();e.target.reset();load()};load();
+const $ = selector => document.querySelector(selector);
+const api = async (url, options) => {
+  const response = await fetch(url, options);
+  if (!response.ok) throw Error(await response.text());
+  return response.json();
+};
+const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
+
+function renderProfile(profile) {
+  $("#profile").innerHTML = `<div><span>身份</span><strong>${esc(profile.school)} · ${esc(profile.graduation)} 毕业</strong></div><div><span>可到岗</span><strong>${esc(profile.availability_start)} — ${esc(profile.availability_end)} · ${esc(profile.days_per_week)} 天/周</strong></div><div><span>地点</span><strong>${profile.priority_cities.map(esc).join("、")} 优先</strong></div><div><span>方向</span><strong>${profile.role_priority.slice(0, 3).map(esc).join(" → ")}</strong></div>`;
+}
+
+function populateCompanies(companies) {
+  const selected = $("#company").value;
+  $("#company").innerHTML = `<option value="">全部 ${companies.length} 家公司</option>${companies.map(c => `<option value="${esc(c.name)}">${esc(c.name)}${c.job_count ? `（${c.job_count}）` : ""}</option>`).join("")}`;
+  $("#company").value = selected;
+  $("#company-options").innerHTML = companies.map(c => `<option value="${esc(c.name)}"></option>`).join("");
+}
+
+async function load() {
+  const query = new URLSearchParams({q: $("#search").value, status: $("#status").value, city_group: $("#city").value, company: $("#company").value});
+  const [profile, dashboard, jobs, companies] = await Promise.all([api("/api/profile"), api("/api/dashboard"), api(`/api/jobs?${query}`), api("/api/companies")]);
+  renderProfile(profile);
+  populateCompanies(companies);
+  const metrics = [["已收录职位", dashboard.total], ["高匹配 ≥75", dashboard.strong], ["已投递", dashboard.applied], ["面试中", dashboard.interviewing], ["可同步官网", dashboard.active_sources], ["官网来源", dashboard.companies]];
+  $("#stats").innerHTML = metrics.map(([label, number]) => `<div class="stat"><b>${number}</b><span>${label}</span></div>`).join("");
+  $("#empty").hidden = jobs.length > 0;
+  $("#jobs").innerHTML = jobs.map(job => `<article class="job"><div class="score">${job.score}</div><h3>${esc(job.title)}</h3><p class="meta">${esc(job.company)} · ${esc(job.city || "地点待确认")} · ${esc(job.source)}</p><p class="reason">${job.score_reasons.map(esc).join("<br>")}</p><div class="actions"><a href="${esc(job.url)}" target="_blank" rel="noopener">查看官网 ↗</a><button onclick="setJob(${job.id}, '${job.favorite ? "favorite" : "status"}', '${job.favorite ? "false" : "true"}')">${job.favorite ? "取消收藏" : "收藏"}</button><button onclick="setJob(${job.id}, 'status', '已投递')">标记已投</button><button onclick="removeJob(${job.id})">删除</button></div></article>`).join("");
+  $("#companies").innerHTML = companies.map(company => {
+    const state = company.status === "active" ? "已接入同步" : "待适配";
+    const count = company.job_count ? ` · 已入库 ${company.job_count} 条` : "";
+    return `<div class="company"><a target="_blank" rel="noopener" href="${esc(company.careers_url)}">${esc(company.name)} ↗</a><small class="${company.status}">${state}${count} · ${esc(company.connector_note)}</small></div>`;
+  }).join("");
+}
+
+window.setJob = async (id, key, value) => {
+  await api(`/api/jobs/${id}`, {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(key === "favorite" ? {favorite: value === "true"} : {status: value})});
+  load();
+};
+window.removeJob = async id => {
+  if (confirm("确认删除这条职位？")) {
+    await api(`/api/jobs/${id}`, {method: "DELETE"});
+    load();
+  }
+};
+
+$("#search").oninput = load;
+$("#company").onchange = load;
+$("#city").onchange = load;
+$("#status").onchange = load;
+$("#add").onclick = () => $("#modal").showModal();
+$("#sync").onclick = async () => {
+  const button = $("#sync");
+  button.disabled = true;
+  button.textContent = "正在同步…";
+  try {
+    const result = await api("/api/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+    alert(result.results.map(item => `${item.company}：${item.message}`).join("\n"));
+    await load();
+  } catch (error) {
+    alert(`同步失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "同步已接入官网";
+  }
+};
+$("#jobForm").onsubmit = async event => {
+  event.preventDefault();
+  const job = Object.fromEntries(new FormData(event.target));
+  for (const key of ["duration_weeks", "work_days"]) job[key] = job[key] ? Number(job[key]) : null;
+  await api("/api/jobs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(job)});
+  $("#modal").close();
+  event.target.reset();
+  load();
+};
+load();

@@ -250,7 +250,7 @@ def profile() -> dict[str, Any]:
 
 
 @app.get("/api/jobs")
-def list_jobs(q: str = "", status: str = "", city_group: str = "") -> list[dict[str, Any]]:
+def list_jobs(q: str = "", status: str = "", city_group: str = "", company: str = "") -> list[dict[str, Any]]:
     with closing(connection()) as conn:
         rows = [dict(r) for r in conn.execute("SELECT * FROM jobs ORDER BY favorite DESC, score DESC, updated_at DESC")]
     for row in rows:
@@ -261,6 +261,8 @@ def list_jobs(q: str = "", status: str = "", city_group: str = "") -> list[dict[
         rows = [r for r in rows if term in normalized(" ".join(str(r[k]) for k in ("title", "company", "city", "description")))]
     if status:
         rows = [r for r in rows if r["status"] == status]
+    if company:
+        rows = [r for r in rows if r["company"] == company]
     if city_group == "yangtze":
         rows = [r for r in rows if any(c in r["city"] for c in PROFILE["priority_cities"])]
     if city_group == "pearl":
@@ -359,7 +361,11 @@ def delete_job(job_id: int) -> dict[str, bool]:
 @app.get("/api/companies")
 def companies() -> list[dict[str, Any]]:
     with closing(connection()) as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM companies ORDER BY name")]
+        return [dict(r) for r in conn.execute("""
+          SELECT c.*, COUNT(j.id) AS job_count
+          FROM companies c LEFT JOIN jobs j ON j.company = c.name
+          GROUP BY c.name ORDER BY CASE c.status WHEN 'active' THEN 0 ELSE 1 END, c.name
+        """)]
 
 
 @app.get("/api/dashboard")
@@ -368,8 +374,10 @@ def dashboard() -> dict[str, Any]:
         summary = conn.execute("""SELECT COUNT(*) total, SUM(score >= 75) strong,
           SUM(status = '已投递') applied, SUM(status = '面试中') interviewing FROM jobs""").fetchone()
         companies_count = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+        active_sources = conn.execute("SELECT COUNT(*) FROM companies WHERE status = 'active'").fetchone()[0]
     return {"total": summary["total"], "strong": summary["strong"] or 0, "applied": summary["applied"] or 0,
-            "interviewing": summary["interviewing"] or 0, "companies": companies_count}
+            "interviewing": summary["interviewing"] or 0, "companies": companies_count,
+            "active_sources": active_sources}
 
 
 @app.get("/api/jobs/export")
