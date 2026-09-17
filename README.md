@@ -18,6 +18,7 @@
 - 75 个国内中大型公司官网入口；为逐家公司实现低频、公开接口优先的 connector 预留数据模型；
 - 已接入字节跳动、腾讯、美团、小红书、京东、滴滴、百度、哔哩哔哩、网易、携程、科大讯飞、地平线、小鹏汽车、蔚来的公开职位 API；点击“同步已接入官网”即可手动增量同步；
 - 新增岗位提醒出站队列：自动同步的新高匹配岗位会只入队一次，等待选择通知渠道后发送；同步轮次与失败原因可审计；
+- 企业微信机器人通知：配置本地 Webhook 后，Worker 会将待提醒高匹配岗位合并成摘要推送，并只标记成功发送的岗位；
 - SQLite 本地存储；Docker 一键启动；个人资料配置不提交到 Git。
 
 ## 架构
@@ -54,6 +55,16 @@ docker compose up --build
 ```
 
 数据写入 `data/radar.db`，本地个人资料写入 `config/profile.json`；两者都已被 `.gitignore` 排除。
+
+### 企业微信机器人提醒
+
+在企业微信群添加机器人，复制其 Webhook 地址到本地 `.env`：
+
+```text
+WECOM_BOT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的密钥
+```
+
+可先复制 `.env.example` 为 `.env`。Webhook 不会输出到日志、不会写入数据库，也不应提交到 Git。启动 `docker compose up --build` 后，Worker 会在每轮同步后推送达到 `alert_threshold` 的新岗位；未配置 Webhook 时只保留本地待发送队列。
 
 ## 个人配置
 

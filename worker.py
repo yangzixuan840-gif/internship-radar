@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-from app import PROFILE, SyncRequest, init_db, sync_jobs
+from app import PROFILE, SyncRequest, dispatch_wecom_alerts, init_db, sync_jobs
 
 
 def main() -> None:
@@ -17,7 +17,8 @@ def main() -> None:
     while True:
         result = sync_jobs(SyncRequest())
         ok = sum(item["status"] == "ok" for item in result["results"])
-        print(f"同步轮次完成：{ok}/{len(result['results'])} 个来源成功；{interval // 60} 分钟后重试", flush=True)
+        delivery = dispatch_wecom_alerts()
+        print(f"同步轮次完成：{ok}/{len(result['results'])} 个来源成功；{delivery['message']}；{interval // 60} 分钟后重试", flush=True)
         time.sleep(interval)
 
 

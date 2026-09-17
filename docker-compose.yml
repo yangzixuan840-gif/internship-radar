@@ -5,8 +5,12 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+    environment:
+      WECOM_BOT_WEBHOOK: ${WECOM_BOT_WEBHOOK:-}
   internship-radar-worker:
     build: .
     command: ["python", "worker.py"]
     volumes:
       - ./data:/app/data
+    environment:
+      WECOM_BOT_WEBHOOK: ${WECOM_BOT_WEBHOOK:-}

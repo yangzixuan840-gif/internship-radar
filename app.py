@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from connectors import CONNECTORS
+from notifier import send_markdown, webhook_url
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "radar.db"
@@ -165,6 +166,9 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status, created_at DESC);
         """)
+        alert_columns = {row["name"] for row in conn.execute("PRAGMA table_info(alerts)")}
+        if "last_error" not in alert_columns:
+            conn.execute("ALTER TABLE alerts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''")
         conn.executemany(
             """INSERT INTO companies(name, careers_url, status, connector_note) VALUES (?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET careers_url=excluded.careers_url,
@@ -324,6 +328,36 @@ def queue_alert_if_relevant(job: dict[str, Any]) -> bool:
     return queued
 
 
+def dispatch_wecom_alerts(limit: int = 8) -> dict[str, Any]:
+    """Send one digest and atomically mark only its included alerts as sent."""
+    if not webhook_url():
+        return {"sent": 0, "status": "not_configured", "message": "未配置企业微信机器人 Webhook，提醒保留在待发送队列"}
+    with closing(connection()) as conn:
+        alerts = [dict(row) for row in conn.execute("""
+          SELECT a.id, j.title, j.company, j.city, j.url, j.score
+          FROM alerts a JOIN jobs j ON j.id = a.job_id
+          WHERE a.status = '待发送' ORDER BY j.score DESC, a.created_at ASC LIMIT ?
+        """, (limit,))]
+    if not alerts:
+        return {"sent": 0, "status": "empty", "message": "没有待发送提醒"}
+    lines = ["## 实习雷达：发现高匹配新岗位"]
+    for item in alerts:
+        location = item["city"] or "地点待确认"
+        lines.append(f"> **{item['company']} · {item['title']}**（{item['score']} 分）\\n> {location}\\n> {item['url']}")
+    try:
+        send_markdown("\n\n".join(lines))
+    except Exception as error:
+        with closing(connection()) as conn:
+            conn.executemany("UPDATE alerts SET last_error = ? WHERE id = ?", [(str(error), item["id"]) for item in alerts])
+            conn.commit()
+        return {"sent": 0, "status": "error", "message": f"企业微信发送失败：{error}"}
+    now = datetime.now(timezone.utc).isoformat()
+    with closing(connection()) as conn:
+        conn.executemany("UPDATE alerts SET status = '已发送', handled_at = ?, last_error = '' WHERE id = ?", [(now, item["id"]) for item in alerts])
+        conn.commit()
+    return {"sent": len(alerts), "status": "ok", "message": f"已推送 {len(alerts)} 条企业微信提醒"}
+
+
 @app.post("/api/jobs/import")
 def import_jobs(jobs: list[JobInput]) -> dict[str, int]:
     for job in jobs:
@@ -418,6 +452,11 @@ def update_alert(alert_id: int, update: AlertUpdate) -> dict[str, bool]:
     if result.rowcount == 0:
         raise HTTPException(404, "提醒不存在")
     return {"ok": True}
+
+
+@app.post("/api/alerts/dispatch")
+def dispatch_alerts() -> dict[str, Any]:
+    return dispatch_wecom_alerts()
 
 
 @app.get("/api/companies")
