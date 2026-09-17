@@ -7,5 +7,7 @@
   "priority_cities": ["上海", "杭州", "苏州", "南京", "宁波"],
   "secondary_cities": ["深圳", "广州", "珠海", "厦门"],
   "role_priority": ["后端开发", "AI应用", "平台研发", "云原生", "数据工程", "全栈开发", "测试开发"],
-  "skills": ["Java", "Spring Boot", "Python", "SQL", "Redis", "Linux", "Docker", "Git"]
+  "skills": ["Java", "Spring Boot", "Python", "SQL", "Redis", "Linux", "Docker", "Git"],
+  "alert_threshold": 75,
+  "sync_minutes": 30
 }

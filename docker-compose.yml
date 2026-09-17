@@ -5,3 +5,8 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+  internship-radar-worker:
+    build: .
+    command: ["python", "worker.py"]
+    volumes:
+      - ./data:/app/data

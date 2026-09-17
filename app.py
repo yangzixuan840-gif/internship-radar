@@ -30,6 +30,8 @@ DEFAULT_PROFILE = {
     "secondary_cities": ["深圳", "广州", "珠海", "厦门"],
     "role_priority": ["后端开发", "AI应用", "平台研发", "云原生", "数据工程", "全栈开发", "测试开发"],
     "skills": ["Java", "Spring Boot", "Python", "SQL", "Redis", "Linux", "Docker", "Git"],
+    "alert_threshold": 75,
+    "sync_minutes": 30,
 }
 
 
@@ -131,6 +133,7 @@ def connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -150,6 +153,17 @@ def init_db() -> None:
           name TEXT PRIMARY KEY, careers_url TEXT NOT NULL, status TEXT NOT NULL,
           connector_note TEXT NOT NULL, last_checked_at TEXT, last_result TEXT
         );
+        CREATE TABLE IF NOT EXISTS source_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL,
+          started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
+          fetched_count INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS alerts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL UNIQUE,
+          status TEXT NOT NULL DEFAULT '待发送', created_at TEXT NOT NULL,
+          handled_at TEXT, FOREIGN KEY(job_id) REFERENCES jobs(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status, created_at DESC);
         """)
         conn.executemany(
             """INSERT INTO companies(name, careers_url, status, connector_note) VALUES (?, ?, ?, ?)
@@ -229,6 +243,10 @@ class SyncRequest(BaseModel):
     sources: list[str] | None = None
 
 
+class AlertUpdate(BaseModel):
+    status: str
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -276,6 +294,7 @@ def upsert_job(job: JobInput) -> dict[str, Any]:
     score, reasons = score_job(raw)
     now = datetime.now(timezone.utc).isoformat()
     values = {**raw, "score": score, "score_reasons": json.dumps(reasons, ensure_ascii=False), "updated_at": now}
+    created = False
     with closing(connection()) as conn:
         existing = conn.execute("SELECT id FROM jobs WHERE url = ?", (raw["url"],)).fetchone()
         if existing:
@@ -288,8 +307,21 @@ def upsert_job(job: JobInput) -> dict[str, Any]:
                 score,score_reasons,created_at,updated_at) VALUES (:title,:company,:city,:description,:url,:source,:posted_at,
                 :duration_weeks,:work_days,:score,:score_reasons,:updated_at,:updated_at)""", values)
             job_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            created = True
         conn.commit()
-    return {"id": job_id, "score": score, "reasons": reasons}
+    return {"id": job_id, "score": score, "reasons": reasons, "created": created}
+
+
+def queue_alert_if_relevant(job: dict[str, Any]) -> bool:
+    """Create exactly one local notification-outbox item for a new strong match."""
+    if not job["created"] or job["score"] < int(PROFILE["alert_threshold"]):
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    with closing(connection()) as conn:
+        conn.execute("INSERT OR IGNORE INTO alerts(job_id, created_at) VALUES (?, ?)", (job["id"], now))
+        queued = conn.execute("SELECT changes()").fetchone()[0] == 1
+        conn.commit()
+    return queued
 
 
 @app.post("/api/jobs/import")
@@ -317,15 +349,21 @@ def sync_jobs(request: SyncRequest) -> dict[str, Any]:
                 wait_seconds = int((timedelta(minutes=20) - (now - previous)).total_seconds())
                 results.append({"company": company, "status": "skipped", "message": f"低频保护：请在约 {max(1, wait_seconds // 60)} 分钟后再同步"})
                 continue
+        with closing(connection()) as conn:
+            run_id = conn.execute("INSERT INTO source_runs(company, started_at, status) VALUES (?, ?, 'running')", (company, now.isoformat())).lastrowid
+            conn.commit()
         try:
             fetched = CONNECTORS[company]()
+            alerts_queued = 0
             for raw_job in fetched.jobs:
-                upsert_job(JobInput(**raw_job))
-            message, status = f"{fetched.message}；已写入/更新 {len(fetched.jobs)} 条", "ok"
+                saved = upsert_job(JobInput(**raw_job))
+                alerts_queued += int(queue_alert_if_relevant(saved))
+            message, status = f"{fetched.message}；已写入/更新 {len(fetched.jobs)} 条；新增待提醒 {alerts_queued} 条", "ok"
         except Exception as error:
-            message, status = f"同步失败：{error}", "error"
+            fetched, message, status = None, f"同步失败：{error}", "error"
         with closing(connection()) as conn:
             conn.execute("UPDATE companies SET last_checked_at = ?, last_result = ? WHERE name = ?", (now.isoformat(), message, company))
+            conn.execute("UPDATE source_runs SET finished_at = ?, status = ?, fetched_count = ?, message = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), status, len(fetched.jobs) if fetched else 0, message, run_id))
             conn.commit()
         results.append({"company": company, "status": status, "message": message})
     return {"results": results}
@@ -358,6 +396,30 @@ def delete_job(job_id: int) -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/api/alerts")
+def list_alerts(status: str = "待发送") -> list[dict[str, Any]]:
+    with closing(connection()) as conn:
+        return [dict(row) for row in conn.execute("""
+          SELECT a.id, a.status AS alert_status, a.created_at AS alerted_at,
+                 j.id AS job_id, j.title, j.company, j.city, j.url, j.score, j.score_reasons
+          FROM alerts a JOIN jobs j ON j.id = a.job_id
+          WHERE (? = '' OR a.status = ?)
+          ORDER BY j.score DESC, a.created_at DESC
+        """, (status, status))]
+
+
+@app.patch("/api/alerts/{alert_id}")
+def update_alert(alert_id: int, update: AlertUpdate) -> dict[str, bool]:
+    if update.status not in {"待发送", "已发送", "已查看", "已忽略"}:
+        raise HTTPException(400, "未知提醒状态")
+    with closing(connection()) as conn:
+        result = conn.execute("UPDATE alerts SET status = ?, handled_at = ? WHERE id = ?", (update.status, datetime.now(timezone.utc).isoformat(), alert_id))
+        conn.commit()
+    if result.rowcount == 0:
+        raise HTTPException(404, "提醒不存在")
+    return {"ok": True}
+
+
 @app.get("/api/companies")
 def companies() -> list[dict[str, Any]]:
     with closing(connection()) as conn:
@@ -375,9 +437,10 @@ def dashboard() -> dict[str, Any]:
           SUM(status = '已投递') applied, SUM(status = '面试中') interviewing FROM jobs""").fetchone()
         companies_count = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
         active_sources = conn.execute("SELECT COUNT(*) FROM companies WHERE status = 'active'").fetchone()[0]
+        pending_alerts = conn.execute("SELECT COUNT(*) FROM alerts WHERE status = '待发送'").fetchone()[0]
     return {"total": summary["total"], "strong": summary["strong"] or 0, "applied": summary["applied"] or 0,
             "interviewing": summary["interviewing"] or 0, "companies": companies_count,
-            "active_sources": active_sources}
+            "active_sources": active_sources, "pending_alerts": pending_alerts}
 
 
 @app.get("/api/jobs/export")

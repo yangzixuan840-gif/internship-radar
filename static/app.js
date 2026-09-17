@@ -19,12 +19,14 @@ function populateCompanies(companies) {
 
 async function load() {
   const query = new URLSearchParams({q: $("#search").value, status: $("#status").value, city_group: $("#city").value, company: $("#company").value});
-  const [profile, dashboard, jobs, companies] = await Promise.all([api("/api/profile"), api("/api/dashboard"), api(`/api/jobs?${query}`), api("/api/companies")]);
+  const [profile, dashboard, jobs, companies, alerts] = await Promise.all([api("/api/profile"), api("/api/dashboard"), api(`/api/jobs?${query}`), api("/api/companies"), api("/api/alerts")]);
   renderProfile(profile);
   populateCompanies(companies);
-  const metrics = [["已收录职位", dashboard.total], ["高匹配 ≥75", dashboard.strong], ["已投递", dashboard.applied], ["面试中", dashboard.interviewing], ["可同步官网", dashboard.active_sources], ["官网来源", dashboard.companies]];
+  const metrics = [["已收录职位", dashboard.total], ["高匹配 ≥75", dashboard.strong], ["待提醒", dashboard.pending_alerts], ["已投递", dashboard.applied], ["面试中", dashboard.interviewing], ["可同步官网", dashboard.active_sources], ["官网来源", dashboard.companies]];
   $("#stats").innerHTML = metrics.map(([label, number]) => `<div class="stat"><b>${number}</b><span>${label}</span></div>`).join("");
   $("#empty").hidden = jobs.length > 0;
+  $("#alerts").hidden = alerts.length === 0;
+  $("#alerts").innerHTML = alerts.length ? `<h2>发现 ${alerts.length} 条高匹配新岗位</h2><p>${alerts.slice(0, 3).map(item => `${esc(item.company)} · ${esc(item.title)}（${item.score} 分）`).join("<br>")}<br>提醒渠道尚未配置；请先查看官网链接后决定是否投递。</p>` : "";
   $("#jobs").innerHTML = jobs.map(job => `<article class="job"><div class="score">${job.score}</div><h3>${esc(job.title)}</h3><p class="meta">${esc(job.company)} · ${esc(job.city || "地点待确认")} · ${esc(job.source)}</p><p class="reason">${job.score_reasons.map(esc).join("<br>")}</p><div class="actions"><a href="${esc(job.url)}" target="_blank" rel="noopener">查看官网 ↗</a><button onclick="setJob(${job.id}, '${job.favorite ? "favorite" : "status"}', '${job.favorite ? "false" : "true"}')">${job.favorite ? "取消收藏" : "收藏"}</button><button onclick="setJob(${job.id}, 'status', '已投递')">标记已投</button><button onclick="removeJob(${job.id})">删除</button></div></article>`).join("");
   $("#companies").innerHTML = companies.map(company => {
     const state = company.status === "active" ? "已接入同步" : "待适配";
