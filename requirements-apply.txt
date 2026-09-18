@@ -1,0 +1,2 @@
+# Optional local browser automation. Never run in headless-submit mode.
+playwright>=1.50,<2

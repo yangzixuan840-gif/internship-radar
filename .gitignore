@@ -4,4 +4,5 @@ __pycache__/
 radar.db
 data/
 config/profile.json
+config/application.json
 .env

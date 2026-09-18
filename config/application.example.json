@@ -1,0 +1,10 @@
+{
+  "full_name": "填写真实姓名",
+  "email": "name@example.com",
+  "phone": "13800000000",
+  "city": "上海",
+  "links": {
+    "github": "https://github.com/your-account",
+    "portfolio": ""
+  }
+}

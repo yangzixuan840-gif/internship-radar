@@ -180,6 +180,11 @@ def init_db() -> None:
           FOREIGN KEY(resume_id) REFERENCES resumes(id)
         );
         CREATE INDEX IF NOT EXISTS idx_application_kits_status ON application_kits(status, updated_at DESC);
+        CREATE TABLE IF NOT EXISTS application_attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, kit_id INTEGER NOT NULL, started_at TEXT NOT NULL,
+          finished_at TEXT, result TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', screenshot_path TEXT DEFAULT '',
+          FOREIGN KEY(kit_id) REFERENCES application_kits(id)
+        );
         """)
         alert_columns = {row["name"] for row in conn.execute("PRAGMA table_info(alerts)")}
         if "last_error" not in alert_columns:

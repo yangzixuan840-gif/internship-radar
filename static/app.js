@@ -49,7 +49,11 @@ window.createKit = async jobId => {
   try {
     const result = await api(`/api/jobs/${jobId}/application-kit`, {method: "POST"});
     const kit = result.kit;
-    alert(`投递包已生成（${kit.resume_name}）\n命中技能：${kit.matched_skills.join("、") || "待核对"}\n可能缺口：${kit.possible_gaps.join("、") || "未识别"}\n\n请先核对内容，再在官网手动确认提交。`);
+    const details = `投递包已生成（${kit.resume_name}）\n命中技能：${kit.matched_skills.join("、") || "待核对"}\n可能缺口：${kit.possible_gaps.join("、") || "未识别"}`;
+    if (confirm(`${details}\n\n确认将它加入“已准备”队列吗？只有已准备的投递包才能启动受控自动填表，且最终提交仍需你本人点击。`)) {
+      await api(`/api/application-kits/${result.id}`, {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify({status: "已准备"})});
+      alert("已加入投递队列。请在本机运行 apply_worker.py 打开官网并进行受控填表。");
+    }
   } catch (error) {
     alert(`无法生成投递包：${error.message}`);
   }

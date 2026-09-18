@@ -20,6 +20,7 @@
 - 新增岗位提醒出站队列：自动同步的新高匹配岗位会只入队一次，等待选择通知渠道后发送；同步轮次与失败原因可审计；
 - 企业微信机器人通知：配置本地 Webhook 后，Worker 会将待提醒高匹配岗位合并成摘要推送，并只标记成功发送的岗位；
 - 简历版本与投递包：简历文件仅保存在本机；可从任意岗位生成技能命中、待核对缺口、投递前检查项与不虚构经历的投递说明草稿；
+- 受控浏览器填表：只对用户确认“已准备”的投递包打开官网、填写无歧义基础字段和上传本地简历；不处理验证码、不填写主观题、更不会点击最终提交；
 - SQLite 本地存储；Docker 一键启动；个人资料配置不提交到 Git。
 
 ## 架构
@@ -67,6 +68,19 @@ WECOM_BOT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的密
 
 可先复制 `.env.example` 为 `.env`。Webhook 不会输出到日志、不会写入数据库，也不应提交到 Git。启动 `docker compose up --build` 后，Worker 会在每轮同步后推送达到 `alert_threshold` 的新岗位；未配置 Webhook 时只保留本地待发送队列。
 
+### 受控投递填表
+
+先在网页中生成并确认投递包，再将配置模板复制为本地文件：
+
+```powershell
+Copy-Item config/application.example.json config/application.json
+pip install -r requirements-apply.txt
+playwright install chromium
+python apply_worker.py --kit <投递包编号>
+```
+
+脚本会打开可见浏览器，最多填写姓名、邮箱、电话、城市和文件上传控件，并截图记录本次操作。它不会点击任何“投递 / 提交 / 下一步”按钮；验证码、登录、主观问题和最终提交均需用户亲自处理。
+
 ## 个人配置
 
 把 `config/profile.example.json` 复制为 `config/profile.json` 后，填写你的毕业时间、到岗窗口、城市优先级、目标方向与技能。`alert_threshold` 是进入提醒队列的最低分数，`sync_minutes` 是后台同步间隔（最低 20 分钟）。该文件只保留在本地，应用启动时自动加载。
@@ -97,7 +111,7 @@ WECOM_BOT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的密
 1. 为少量目标公司增加经过验证的公开职位 API connector；
 2. 接入邮件、Telegram 或 ntfy 等由用户配置的通知渠道；
 3. 增加针对简历技能的权重编辑与评分解释视图；
-4. 为已确认的投递包增加受控浏览器自动填表与人工最终确认；
+4. 针对少数常用官网招聘系统增加字段映射；
 5. 增加测试、CI 与部署示例。
 
 ## 技术栈
