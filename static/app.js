@@ -27,7 +27,7 @@ async function load() {
   $("#empty").hidden = jobs.length > 0;
   $("#alerts").hidden = alerts.length === 0;
   $("#alerts").innerHTML = alerts.length ? `<h2>发现 ${alerts.length} 条高匹配新岗位</h2><p>${alerts.slice(0, 3).map(item => `${esc(item.company)} · ${esc(item.title)}（${item.score} 分）`).join("<br>")}<br>提醒渠道尚未配置；请先查看官网链接后决定是否投递。</p>` : "";
-  $("#jobs").innerHTML = jobs.map(job => `<article class="job"><div class="score">${job.score}</div><h3>${esc(job.title)}</h3><p class="meta">${esc(job.company)} · ${esc(job.city || "地点待确认")} · ${esc(job.source)}</p><p class="reason">${job.score_reasons.map(esc).join("<br>")}</p><div class="actions"><a href="${esc(job.url)}" target="_blank" rel="noopener">查看官网 ↗</a><button onclick="setJob(${job.id}, '${job.favorite ? "favorite" : "status"}', '${job.favorite ? "false" : "true"}')">${job.favorite ? "取消收藏" : "收藏"}</button><button onclick="setJob(${job.id}, 'status', '已投递')">标记已投</button><button onclick="removeJob(${job.id})">删除</button></div></article>`).join("");
+  $("#jobs").innerHTML = jobs.map(job => `<article class="job"><div class="score">${job.score}</div><h3>${esc(job.title)}</h3><p class="meta">${esc(job.company)} · ${esc(job.city || "地点待确认")} · ${esc(job.source)}</p><p class="reason">${job.score_reasons.map(esc).join("<br>")}</p><div class="actions"><a href="${esc(job.url)}" target="_blank" rel="noopener">查看官网 ↗</a><button onclick="createKit(${job.id})">生成投递包</button><button onclick="setJob(${job.id}, '${job.favorite ? "favorite" : "status"}', '${job.favorite ? "false" : "true"}')">${job.favorite ? "取消收藏" : "收藏"}</button><button onclick="setJob(${job.id}, 'status', '已投递')">标记已投</button><button onclick="removeJob(${job.id})">删除</button></div></article>`).join("");
   $("#companies").innerHTML = companies.map(company => {
     const state = company.status === "active" ? "已接入同步" : "待适配";
     const count = company.job_count ? ` · 已入库 ${company.job_count} 条` : "";
@@ -45,12 +45,22 @@ window.removeJob = async id => {
     load();
   }
 };
+window.createKit = async jobId => {
+  try {
+    const result = await api(`/api/jobs/${jobId}/application-kit`, {method: "POST"});
+    const kit = result.kit;
+    alert(`投递包已生成（${kit.resume_name}）\n命中技能：${kit.matched_skills.join("、") || "待核对"}\n可能缺口：${kit.possible_gaps.join("、") || "未识别"}\n\n请先核对内容，再在官网手动确认提交。`);
+  } catch (error) {
+    alert(`无法生成投递包：${error.message}`);
+  }
+};
 
 $("#search").oninput = load;
 $("#company").onchange = load;
 $("#city").onchange = load;
 $("#status").onchange = load;
 $("#add").onclick = () => $("#modal").showModal();
+$("#resume").onclick = () => $("#resume-modal").showModal();
 $("#sync").onclick = async () => {
   const button = $("#sync");
   button.disabled = true;
@@ -74,5 +84,16 @@ $("#jobForm").onsubmit = async event => {
   $("#modal").close();
   event.target.reset();
   load();
+};
+$("#resumeForm").onsubmit = async event => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const resume = {name: form.get("name"), summary: form.get("summary"), skills: String(form.get("skills") || "").split(/[，,]/).map(item => item.trim()).filter(Boolean), is_default: form.get("is_default") === "on"};
+  const saved = await api("/api/resumes", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(resume)});
+  const file = form.get("file");
+  if (file && file.size) await api(`/api/resumes/${saved.id}/file`, {method: "PUT", headers: {"Content-Type": "application/octet-stream", "filename": file.name}, body: file});
+  $("#resume-modal").close();
+  event.target.reset();
+  alert("简历版本已保存在本机；生成投递包时会使用默认版本。");
 };
 load();

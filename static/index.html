@@ -1,5 +1,5 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>国内实习雷达</title><link rel="stylesheet" href="/static/style.css"></head><body>
-<header><div><p class="eyebrow">PERSONAL JOB INTELLIGENCE</p><h1>国内实习雷达</h1></div><div class="header-actions"><button id="sync">同步已接入官网</button><a class="export" href="/api/jobs/export">导出 CSV</a></div></header>
+<header><div><p class="eyebrow">PERSONAL JOB INTELLIGENCE</p><h1>国内实习雷达</h1></div><div class="header-actions"><button id="resume">管理简历</button><button id="sync">同步已接入官网</button><a class="export" href="/api/jobs/export">导出 CSV</a></div></header>
 <main>
 <section class="profile" id="profile"><div><span>身份</span><strong>正在加载个人配置…</strong></div></section>
 <section class="stats" id="stats"></section>
@@ -9,4 +9,5 @@
 <section class="sources"><div><p class="eyebrow">OFFICIAL SOURCES</p><h2>75 家官网来源</h2><p>已接入来源可自动同步；待适配来源可直接打开官网并手工录入，录入后会进入同一套智能评分与公司筛选。</p></div><div id="companies" class="company-list"></div></section>
 </main>
 <dialog id="modal"><form method="dialog" id="jobForm"><div class="modal-head"><h2>录入职位</h2><button class="close">×</button></div><label>职位名称<input name="title" required placeholder="后端开发实习生"></label><label>公司<input name="company" list="company-options" required><datalist id="company-options"></datalist></label><label>城市<input name="city" placeholder="上海"></label><label>职位链接<input name="url" type="url" required></label><div class="split"><label>实习周数<input name="duration_weeks" type="number" min="1" placeholder="10"></label><label>每周天数<input name="work_days" type="number" min="1" max="7" placeholder="5"></label></div><label>来源<input name="source" value="官网"></label><label>职位描述<textarea name="description" placeholder="粘贴任职要求、技术栈和时间要求"></textarea></label><button class="primary" type="submit">保存并评分</button></form></dialog>
+<dialog id="resume-modal"><form method="dialog" id="resumeForm"><div class="modal-head"><h2>简历版本</h2><button class="close">×</button></div><label>版本名称<input name="name" required placeholder="后端开发版"></label><label>技能（用中文逗号分隔）<input name="skills" placeholder="Java，Spring Boot，Python，SQL"></label><label>经历摘要<textarea name="summary" placeholder="只填写真实经历；将用于生成投递前核对清单。"></textarea></label><label>简历文件（PDF/DOCX，最大 10MB）<input name="file" type="file" accept=".pdf,.doc,.docx"></label><label><input name="is_default" type="checkbox" checked> 设为默认简历</label><button class="primary" type="submit">保存本地简历</button></form></dialog>
 <script src="/static/app.js"></script></body></html>

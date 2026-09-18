@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Body, FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -19,6 +19,7 @@ from notifier import send_markdown, webhook_url
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "radar.db"
+RESUMES_PATH = ROOT / "data" / "resumes"
 PROFILE_PATH = ROOT / "config" / "profile.json"
 
 DEFAULT_PROFILE = {
@@ -165,6 +166,20 @@ def init_db() -> None:
           handled_at TEXT, FOREIGN KEY(job_id) REFERENCES jobs(id)
         );
         CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status, created_at DESC);
+        CREATE TABLE IF NOT EXISTS resumes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+          filename TEXT DEFAULT '', mime_type TEXT DEFAULT '', stored_path TEXT DEFAULT '',
+          summary TEXT NOT NULL DEFAULT '', skills TEXT NOT NULL DEFAULT '[]',
+          is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS application_kits (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, resume_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT '待确认', kit_json TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          UNIQUE(job_id, resume_id), FOREIGN KEY(job_id) REFERENCES jobs(id),
+          FOREIGN KEY(resume_id) REFERENCES resumes(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_application_kits_status ON application_kits(status, updated_at DESC);
         """)
         alert_columns = {row["name"] for row in conn.execute("PRAGMA table_info(alerts)")}
         if "last_error" not in alert_columns:
@@ -251,6 +266,17 @@ class AlertUpdate(BaseModel):
     status: str
 
 
+class ResumeInput(BaseModel):
+    name: str
+    summary: str = ""
+    skills: list[str] = []
+    is_default: bool = False
+
+
+class ApplicationKitUpdate(BaseModel):
+    status: str
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -326,6 +352,29 @@ def queue_alert_if_relevant(job: dict[str, Any]) -> bool:
         queued = conn.execute("SELECT changes()").fetchone()[0] == 1
         conn.commit()
     return queued
+
+
+def safe_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return cleaned[:120] or "resume.bin"
+
+
+def build_application_kit(job: sqlite3.Row, resume: sqlite3.Row) -> dict[str, Any]:
+    resume_skills = [str(skill) for skill in json.loads(resume["skills"])]
+    job_text = normalized(" ".join(str(job[key] or "") for key in ("title", "description", "city")))
+    hits = [skill for skill in resume_skills if normalized(skill) and normalized(skill) in job_text]
+    role_terms = ["Python", "Java", "SQL", "Docker", "Redis", "Spring", "React", "Linux", "Kubernetes", "LLM", "RAG"]
+    gaps = [term for term in role_terms if normalized(term) in job_text and term not in hits]
+    return {
+        "resume_name": resume["name"], "job_score": job["score"], "matched_skills": hits,
+        "possible_gaps": gaps,
+        "checklist": [
+            "核对毕业时间、到岗日期和每周到岗天数是否符合岗位要求。",
+            "只保留简历中真实存在的项目、技能和成果，不补造经历。",
+            "在招聘官网确认职位仍开放，并手动检查隐私声明与投递问题。",
+        ],
+        "cover_letter_draft": f"您好，我对 {job['company']} 的 {job['title']} 职位很感兴趣。我的经历与技能概览已随简历提交；我愿意根据岗位要求进一步说明相关项目实践。期待有机会交流，谢谢。",
+    }
 
 
 def dispatch_wecom_alerts(limit: int = 8) -> dict[str, Any]:
@@ -427,6 +476,100 @@ def delete_job(job_id: int) -> dict[str, bool]:
         conn.commit()
     if result.rowcount == 0:
         raise HTTPException(404, "职位不存在")
+    return {"ok": True}
+
+
+@app.get("/api/resumes")
+def list_resumes() -> list[dict[str, Any]]:
+    with closing(connection()) as conn:
+        rows = [dict(row) for row in conn.execute("SELECT * FROM resumes ORDER BY is_default DESC, updated_at DESC")]
+    for row in rows:
+        row["is_default"] = bool(row["is_default"])
+        row["skills"] = json.loads(row["skills"])
+        row["has_file"] = bool(row.pop("stored_path"))
+    return rows
+
+
+@app.post("/api/resumes")
+def upsert_resume(resume: ResumeInput) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    with closing(connection()) as conn:
+        if resume.is_default:
+            conn.execute("UPDATE resumes SET is_default = 0")
+        existing = conn.execute("SELECT id FROM resumes WHERE name = ?", (resume.name,)).fetchone()
+        values = (resume.summary, json.dumps(resume.skills, ensure_ascii=False), int(resume.is_default), now, resume.name)
+        if existing:
+            conn.execute("UPDATE resumes SET summary = ?, skills = ?, is_default = ?, updated_at = ? WHERE name = ?", values)
+            resume_id = existing["id"]
+        else:
+            conn.execute("INSERT INTO resumes(name, summary, skills, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", (resume.name, resume.summary, json.dumps(resume.skills, ensure_ascii=False), int(resume.is_default), now, now))
+            resume_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+    return {"id": resume_id}
+
+
+@app.put("/api/resumes/{resume_id}/file")
+def upload_resume_file(resume_id: int, content: bytes = Body(...), filename: str = Header("resume.pdf")) -> dict[str, Any]:
+    if not content or len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "简历文件必须在 1 到 10MB 之间")
+    name = safe_filename(filename)
+    RESUMES_PATH.mkdir(parents=True, exist_ok=True)
+    with closing(connection()) as conn:
+        if not conn.execute("SELECT id FROM resumes WHERE id = ?", (resume_id,)).fetchone():
+            raise HTTPException(404, "简历版本不存在")
+        target = RESUMES_PATH / f"{resume_id}_{name}"
+        target.write_bytes(content)
+        stored_path = str(target.relative_to(ROOT)) if target.is_relative_to(ROOT) else str(target)
+        conn.execute("UPDATE resumes SET filename = ?, stored_path = ?, mime_type = ?, updated_at = ? WHERE id = ?", (name, stored_path, "application/octet-stream", datetime.now(timezone.utc).isoformat(), resume_id))
+        conn.commit()
+    return {"ok": True, "filename": name}
+
+
+@app.post("/api/jobs/{job_id}/application-kit")
+def create_application_kit(job_id: int, resume_id: int | None = None) -> dict[str, Any]:
+    with closing(connection()) as conn:
+        job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not job:
+            raise HTTPException(404, "职位不存在")
+        resume = conn.execute("SELECT * FROM resumes WHERE id = ?", (resume_id,)).fetchone() if resume_id else conn.execute("SELECT * FROM resumes WHERE is_default = 1 ORDER BY updated_at DESC LIMIT 1").fetchone()
+        if not resume:
+            raise HTTPException(400, "请先创建并设为默认简历版本")
+        kit = build_application_kit(job, resume)
+        now = datetime.now(timezone.utc).isoformat()
+        existing = conn.execute("SELECT id FROM application_kits WHERE job_id = ? AND resume_id = ?", (job_id, resume["id"])).fetchone()
+        if existing:
+            conn.execute("UPDATE application_kits SET kit_json = ?, status = '待确认', updated_at = ? WHERE id = ?", (json.dumps(kit, ensure_ascii=False), now, existing["id"]))
+            kit_id = existing["id"]
+        else:
+            conn.execute("INSERT INTO application_kits(job_id, resume_id, kit_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", (job_id, resume["id"], json.dumps(kit, ensure_ascii=False), now, now))
+            kit_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+    return {"id": kit_id, "status": "待确认", "kit": kit}
+
+
+@app.get("/api/application-kits")
+def list_application_kits(status: str = "") -> list[dict[str, Any]]:
+    with closing(connection()) as conn:
+        rows = [dict(row) for row in conn.execute("""
+          SELECT k.id, k.status, k.created_at, k.updated_at, k.kit_json,
+                 j.title, j.company, j.city, j.url, j.score, r.name AS resume_name, r.filename
+          FROM application_kits k JOIN jobs j ON j.id = k.job_id JOIN resumes r ON r.id = k.resume_id
+          WHERE (? = '' OR k.status = ?) ORDER BY k.updated_at DESC
+        """, (status, status))]
+    for row in rows:
+        row["kit"] = json.loads(row.pop("kit_json"))
+    return rows
+
+
+@app.patch("/api/application-kits/{kit_id}")
+def update_application_kit(kit_id: int, update: ApplicationKitUpdate) -> dict[str, bool]:
+    if update.status not in {"待确认", "已准备", "已投递", "已跳过"}:
+        raise HTTPException(400, "未知投递包状态")
+    with closing(connection()) as conn:
+        result = conn.execute("UPDATE application_kits SET status = ?, updated_at = ? WHERE id = ?", (update.status, datetime.now(timezone.utc).isoformat(), kit_id))
+        conn.commit()
+    if result.rowcount == 0:
+        raise HTTPException(404, "投递包不存在")
     return {"ok": True}
 
 
