@@ -381,6 +381,84 @@ def nio_internships() -> SyncResult:
     return feishu_internships("蔚来", "nio.jobs.feishu.cn", "campus")
 
 
+def xiaomi_internships() -> SyncResult:
+    """Xiaomi exposes internships on its dedicated Feishu Hire channel."""
+    return feishu_internships("小米", "xiaomi.jobs.f.mioffice.cn", "internship")
+
+
+def minimax_internships() -> SyncResult:
+    """MiniMax's official internship project is channel 379481."""
+    return feishu_internships("MiniMax", "vrfi1sk8a0.jobs.feishu.cn", "379481")
+
+
+def qianxun_internships() -> SyncResult:
+    """Fetch Qianxun Intelligence's public campus internship channel."""
+    return feishu_internships("千寻智能", "nwd4iy9rd2s.jobs.feishu.cn", "campusofSpiritAI")
+
+
+def xyzrobotics_internships() -> SyncResult:
+    """Poll XYZ Robotics' official 2026 campus channel for future internships."""
+    return feishu_internships("星猿哲科技", "xyzrobotics.jobs.feishu.cn", "2026")
+
+
+def oppo_internships() -> SyncResult:
+    """Fetch OPPO's anonymous official internship feed (one capped page)."""
+    data = request_json(
+        "https://careers.oppo.com/openapi/position/pageNew",
+        body={"pageNum": 1, "pageSize": 100, "recruitmentType": "Intern"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "Origin": "https://careers.oppo.com", "Referer": "https://careers.oppo.com/",
+        },
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(data.get("message") or "OPPO API returned an error")
+    posts = (data.get("data") or {}).get("records") or []
+    jobs = []
+    for post in posts:
+        post_id = str(post.get("idRecruitPosition") or post.get("idProjPosition") or post.get("projectPositionId") or "")
+        jobs.append({
+            "title": post.get("positionName") or post.get("projectPositionName") or "未命名职位",
+            "company": "OPPO", "city": post.get("workCityName") or "",
+            "description": text(post.get("projectName"), post.get("positionTypeName"), post.get("positionDesc"), post.get("positionRequire")),
+            "url": f"https://careers.oppo.com/position/detail?positionId={post_id}" if post_id else "https://careers.oppo.com/",
+            "source": "OPPO 官网 API",
+        })
+    return SyncResult("OPPO", jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 100）")
+
+
+def vivo_internships() -> SyncResult:
+    """Fetch vivo's public Beisen internship category without login."""
+    root = "https://hr-campus.vivo.com"
+    data = request_json(
+        f"{root}/api/Jobad/GetJobAdPageList",
+        body={
+            "PageIndex": 0, "PageSize": 100, "KeyWords": "", "SpecialType": 0,
+            "PortalId": "903cbcbf-4898-46e1-817c-da522a9752b1", "Category": ["3"],
+            "DisplayFields": ["Category", "Kind", "LocId", "Org", "HeadCount", "PostDate", "Salary"],
+        },
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "Origin": root, "Referer": f"{root}/jobs",
+        },
+    )
+    if data.get("Code") != 200:
+        raise RuntimeError(data.get("Message") or "vivo API returned an error")
+    posts = data.get("Data") or []
+    jobs = []
+    for post in posts:
+        post_id = str(post.get("JobAdId") or post.get("Id") or "")
+        category_id = str(post.get("CategoryId") or "3")
+        jobs.append({
+            "title": post.get("JobAdName") or "未命名职位", "company": "vivo",
+            "city": " / ".join(post.get("LocNames") or []),
+            "description": text(post.get("Category"), post.get("Org"), post.get("Duty"), post.get("Require")),
+            "url": f"{root}/{'intern' if category_id == '3' else 'campus'}/detail?jobAdId={post_id}" if post_id else f"{root}/jobs",
+            "source": "vivo 官网 API",
+        })
+    return SyncResult("vivo", jobs, f"已读取 {len(jobs)} 条公开实习职位（单次上限 100）")
+
+
 def trip_internships() -> SyncResult:
     """Ctrip's public feed is complete in one response; filter internships locally."""
     data = request_json(
@@ -461,6 +539,12 @@ CONNECTORS = {
     "网易": netease_internships,
     "小鹏汽车": xpeng_internships,
     "蔚来": nio_internships,
+    "小米": xiaomi_internships,
+    "MiniMax": minimax_internships,
+    "千寻智能": qianxun_internships,
+    "星猿哲科技": xyzrobotics_internships,
+    "OPPO": oppo_internships,
+    "vivo": vivo_internships,
     "携程": trip_internships,
     "科大讯飞": iflytek_internships,
     "地平线": horizon_internships,
