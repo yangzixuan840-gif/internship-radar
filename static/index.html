@@ -1,10 +1,11 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>国内实习雷达</title><link rel="stylesheet" href="/static/style.css"></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>国内实习雷达</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/opportunities.css"></head><body>
 <header><div><p class="eyebrow">PERSONAL JOB INTELLIGENCE</p><h1>国内实习雷达</h1></div><div class="header-actions"><button id="resume">管理简历</button><button id="sync">同步已接入官网</button><a class="export" href="/api/jobs/export">导出 CSV</a></div></header>
 <main>
 <section class="profile" id="profile"><div><span>身份</span><strong>正在加载个人配置…</strong></div></section>
 <section class="stats" id="stats"></section>
 <section id="alerts" class="empty" hidden></section>
 <section class="toolbar"><input id="search" placeholder="搜索公司、职位、技能"><select id="company"><option value="">全部 75 家公司</option></select><select id="city"><option value="">全部城市</option><option value="yangtze">长三角优先</option><option value="pearl">珠三角其次</option></select><select id="status"><option value="">全部状态</option><option>待浏览</option><option>已收藏</option><option>已投递</option><option>面试中</option></select><button id="add">+ 手工录入岗位</button></section>
+<section class="opportunities"><div><p class="eyebrow">OPPORTUNITY DIRECTORY</p><h2>公司 × 岗位机会清单</h2><p>点击“查看岗位”可筛选该公司的全部入库职位；待适配公司会显示暂无自动同步数据。</p></div><div class="opportunity-scroll"><table><thead><tr><th>公司</th><th>当前岗位</th><th>最高匹配</th><th>代表岗位</th><th></th></tr></thead><tbody id="opportunity-list"></tbody></table></div></section>
 <section id="empty" class="empty"><h2>职位库还没有岗位</h2><p>先从目标公司官网复制一个职位链接，再手工录入；也可以通过 API 批量导入 JSON。每条职位都会按你的可到岗时间、城市、岗位方向和技能自动评分。</p></section><section id="jobs" class="jobs"></section>
 <section class="sources"><div><p class="eyebrow">OFFICIAL SOURCES</p><h2>75 家官网来源</h2><p>已接入来源可自动同步；待适配来源可直接打开官网并手工录入，录入后会进入同一套智能评分与公司筛选。</p></div><div id="companies" class="company-list"></div></section>
 </main>

@@ -19,7 +19,7 @@ function populateCompanies(companies) {
 
 async function load() {
   const query = new URLSearchParams({q: $("#search").value, status: $("#status").value, city_group: $("#city").value, company: $("#company").value});
-  const [profile, dashboard, jobs, companies, alerts] = await Promise.all([api("/api/profile"), api("/api/dashboard"), api(`/api/jobs?${query}`), api("/api/companies"), api("/api/alerts")]);
+  const [profile, dashboard, jobs, companies, alerts, opportunities] = await Promise.all([api("/api/profile"), api("/api/dashboard"), api(`/api/jobs?${query}`), api("/api/companies"), api("/api/alerts"), api("/api/opportunities")]);
   renderProfile(profile);
   populateCompanies(companies);
   const metrics = [["已收录职位", dashboard.total], ["高匹配 ≥75", dashboard.strong], ["待提醒", dashboard.pending_alerts], ["已投递", dashboard.applied], ["面试中", dashboard.interviewing], ["可同步官网", dashboard.active_sources], ["官网来源", dashboard.companies]];
@@ -27,6 +27,10 @@ async function load() {
   $("#empty").hidden = jobs.length > 0;
   $("#alerts").hidden = alerts.length === 0;
   $("#alerts").innerHTML = alerts.length ? `<h2>发现 ${alerts.length} 条高匹配新岗位</h2><p>${alerts.slice(0, 3).map(item => `${esc(item.company)} · ${esc(item.title)}（${item.score} 分）`).join("<br>")}<br>提醒渠道尚未配置；请先查看官网链接后决定是否投递。</p>` : "";
+  $("#opportunity-list").innerHTML = opportunities.map(item => {
+    const roles = item.top_jobs.length ? item.top_jobs.map(role => `<div>${esc(role.title)} <small>${esc(role.city || "地点待确认")} · ${role.score} 分</small></div>`).join("") : `<span class="opportunity-empty">${item.status === "active" ? "当前未同步到开放岗位" : "待适配，暂无自动同步数据"}</span>`;
+    return `<tr><td>${esc(item.name)}</td><td>${item.job_count}</td><td>${item.best_score ?? "—"}</td><td class="opportunity-jobs">${roles}</td><td>${item.job_count ? `<button onclick="filterCompany('${esc(item.name)}')">查看岗位</button>` : `<a href="${esc(item.careers_url)}" target="_blank" rel="noopener">官网 ↗</a>`}</td></tr>`;
+  }).join("");
   $("#jobs").innerHTML = jobs.map(job => `<article class="job"><div class="score">${job.score}</div><h3>${esc(job.title)}</h3><p class="meta">${esc(job.company)} · ${esc(job.city || "地点待确认")} · ${esc(job.source)}</p><p class="reason">${job.score_reasons.map(esc).join("<br>")}</p><div class="actions"><a href="${esc(job.url)}" target="_blank" rel="noopener">查看官网 ↗</a><button onclick="createKit(${job.id})">生成投递包</button><button onclick="setJob(${job.id}, '${job.favorite ? "favorite" : "status"}', '${job.favorite ? "false" : "true"}')">${job.favorite ? "取消收藏" : "收藏"}</button><button onclick="setJob(${job.id}, 'status', '已投递')">标记已投</button><button onclick="removeJob(${job.id})">删除</button></div></article>`).join("");
   $("#companies").innerHTML = companies.map(company => {
     const state = company.status === "active" ? "已接入同步" : "待适配";
@@ -44,6 +48,11 @@ window.removeJob = async id => {
     await api(`/api/jobs/${id}`, {method: "DELETE"});
     load();
   }
+};
+window.filterCompany = company => {
+  $("#company").value = company;
+  $("#jobs").scrollIntoView({behavior: "smooth", block: "start"});
+  load();
 };
 window.createKit = async jobId => {
   try {

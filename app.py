@@ -617,6 +617,24 @@ def companies() -> list[dict[str, Any]]:
         """)]
 
 
+@app.get("/api/opportunities")
+def opportunities() -> list[dict[str, Any]]:
+    """A compact directory of every tracked company and its current best roles."""
+    with closing(connection()) as conn:
+        companies_rows = [dict(row) for row in conn.execute("SELECT name, careers_url, status FROM companies")]
+        jobs = [dict(row) for row in conn.execute("SELECT company, title, city, score FROM jobs ORDER BY score DESC, updated_at DESC")]
+    directory = {row["name"]: {**row, "job_count": 0, "best_score": None, "top_jobs": []} for row in companies_rows}
+    for job in jobs:
+        item = directory.get(job["company"])
+        if not item:
+            continue
+        item["job_count"] += 1
+        item["best_score"] = max(item["best_score"] or 0, job["score"])
+        if len(item["top_jobs"]) < 3 and job["title"] not in {role["title"] for role in item["top_jobs"]}:
+            item["top_jobs"].append({"title": job["title"], "city": job["city"], "score": job["score"]})
+    return sorted(directory.values(), key=lambda item: (-item["job_count"], item["name"]))
+
+
 @app.get("/api/dashboard")
 def dashboard() -> dict[str, Any]:
     with closing(connection()) as conn:
